@@ -1,0 +1,27 @@
+[project]
+name = "fastapi-template"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]>=0.135.3",
+]
+
+[tool.fastapi]
+entrypoint = "fastapi_template.main:app"
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+
+[tool.pytest.ini_options]
+testpaths = ["test_fastapi_template"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[dependency-groups]
+dev = [
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.6",
+]
