@@ -9,10 +9,6 @@ from app.settings import Settings
 
 
 @pytest.mark.real_integration
-@pytest.mark.skipif(
-    os.getenv("KBMS_RUN_REAL_INTEGRATION") != "1",
-    reason="set KBMS_RUN_REAL_INTEGRATION=1 to run live-provider integration",
-)
 def test_document_lifecycle_against_live_providers(tmp_path):
     document_id = f"integration-{uuid4().hex}"
     settings = Settings(

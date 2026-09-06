@@ -2,13 +2,13 @@
     "python.testing.unittestArgs": [
         "-v",
         "-s",
-        "./test_docmesh_kbms_api",
+        "./tests",
         "-p",
         "test_*.py"
     ],
     "python.testing.pytestEnabled": true,
     "python.testing.pytestArgs": [
-        "test_docmesh_kbms_api"
+        "tests"
     ],
     "python.terminal.useEnvFile": true,
     "python.envFile": "${workspaceFolder}/.devcontainer/.env"
