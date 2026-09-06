@@ -22,7 +22,7 @@ class Settings:
         )
     )
     minio_endpoint: str = field(
-        default_factory=lambda: _env("KBMS_MINIO_ENDPOINT", "localhost:9000")
+        default_factory=lambda: _env("KBMS_MINIO_ENDPOINT", "minio:9000")
     )
     minio_access_key: str = field(
         default_factory=lambda: _env("KBMS_MINIO_ACCESS_KEY", "minioadmin")
