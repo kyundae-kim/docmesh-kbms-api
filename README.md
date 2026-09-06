@@ -1,28 +1,69 @@
-# fastapi-template
+# docmesh-kbms REST API
 
-Keycloak 기반 인증/인가, PostgreSQL 연동, 계층형 의존성 주입 구조를 갖춘 FastAPI 프로젝트 템플릿입니다.  
-`uv` 패키지 매니저 환경에서 동작합니다.
+FastAPI application layer for the `docmesh-kbms` knowledge-management facade.
+The application exposes one fixed DMS identity (`dms`) and therefore does not
+accept caller identities or domain access contexts. Partition values remain
+explicit so personal and group documents can be addressed by the DMS user.
 
-## 문서
-
-| 문서 | 설명 |
-| --- | --- |
-| [docs/prd.md](docs/prd.md) | 주요 기능, 프로젝트 구조, API 엔드포인트, 기술 스택 |
-| [docs/config.md](docs/config.md) | 환경 변수, YAML 서비스 설정, 환경 파일 예시 |
-| [docs/test.md](docs/test.md) | 단위 테스트·통합 테스트 실행 방법 및 검증 항목 |
-
-## 빠른 시작
+## Run locally
 
 ```bash
-# 의존성 설치
 uv sync
-
-# 개발 서버 실행
 uv run fastapi dev
 ```
 
-## Reference
+The default local configuration uses:
 
-- [uv - fastapi](https://docs.astral.sh/uv/guides/integration/fastapi/)
-- [fastapi - deployment](https://fastapi.tiangolo.com/deployment/docker/)
+- SQLite: `sqlite+aiosqlite:///./kbms.db`
+- Milvus Lite: `./milvus.db`
+- MinIO: `localhost:9000` (`minioadmin` / `minioadmin123`)
+- Ollama: `http://192.168.219.106:11434`, model `bge-m3`
 
+Start the development MinIO service with:
+
+```bash
+docker compose -f .devcontainer/docker-compose.minio.yml up -d
+```
+
+All settings can be overridden with `KBMS_*` environment variables. See
+`app/settings.py` for the complete list.
+
+## REST endpoints
+
+- `POST /documents` — multipart upload (`file`, `title`, `source_uri`,
+  `partition_kind`, `partition_id`; optional `document_id`, JSON `metadata`)
+- `GET /documents` — cursor-based document listing
+- `GET /documents/{document_id}/status` — pipeline status
+- `GET /documents/{document_id}` — metadata
+- `GET /documents/{document_id}/content` — original bytes
+- `DELETE /documents/{document_id}` — delete vectors and DMS document
+- `POST /search` — semantic search with optional document/partition filters
+- `GET /health` — process health
+
+Interactive API documentation is available at `/docs`.
+
+## Tests
+
+```bash
+# Unit and application integration tests
+uv run pytest -q
+
+# SQLite, local Milvus Lite, and live Ollama connection checks
+KBMS_RUN_CONNECTION_TESTS=1 uv run pytest tests/connection -q
+
+# Full live-provider API lifecycle; requires MinIO on localhost:9000
+KBMS_RUN_REAL_INTEGRATION=1 uv run pytest tests/integration/test_real_integration.py -q
+```
+
+The live-provider suites are opt-in so ordinary CI does not require external
+services.
+
+## Docker
+
+```bash
+docker build -t docmesh-kbms-api .
+docker run --rm -p 8000:8000 \
+  --add-host=host.docker.internal:host-gateway \
+  -e KBMS_MINIO_ENDPOINT=host.docker.internal:9000 \
+  docmesh-kbms-api
+```

@@ -510,8 +510,13 @@ name = "docmesh-kbms-api"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiosqlite" },
     { name = "docmesh-kbms" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "minio" },
+    { name = "ollama" },
+    { name = "pymilvus", extra = ["milvus-lite"] },
+    { name = "sqlalchemy" },
 ]
 
 [package.dev-dependencies]
@@ -522,8 +527,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "docmesh-kbms", specifier = ">=0.1.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.135.3" },
+    { name = "minio", specifier = ">=7.2.20" },
+    { name = "ollama", specifier = ">=0.6.2" },
+    { name = "pymilvus", extras = ["milvus-lite"], specifier = ">=3.0.1" },
+    { name = "sqlalchemy", specifier = ">=2.0.52" },
 ]
 
 [package.metadata.requires-dev]
