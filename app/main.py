@@ -6,6 +6,7 @@ from typing import Annotated, Any, NoReturn
 import ollama
 from dms import (
     AccessDeniedError,
+    DocumentDeletedError,
     DocumentNotFoundError,
     DuplicateDocumentError,
     PayloadTooLargeError,
@@ -16,14 +17,18 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response
 from kbms import KnowledgeManagement
 from minio import Minio
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pymilvus import AsyncMilvusClient, MilvusClient
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from .settings import Settings
 
+FIXED_PARTITION_KIND = "personal"
+FIXED_PARTITION_ID = "kbms"
+
 _API_ERRORS = (
     AccessDeniedError,
+    DocumentDeletedError,
     DocumentNotFoundError,
     DuplicateDocumentError,
     PayloadTooLargeError,
@@ -35,11 +40,11 @@ _API_ERRORS = (
 
 
 class SearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: str
     limit: int = Field(default=5, gt=0)
     document_id: str | None = None
-    partition_kind: str | None = None
-    partition_id: str | None = None
 
 
 def _encode(value: Any) -> Any:
@@ -49,6 +54,8 @@ def _encode(value: Any) -> Any:
 def _raise_http(error: Exception) -> NoReturn:
     if isinstance(error, (AccessDeniedError, PermissionError)):
         raise HTTPException(status_code=403, detail=str(error)) from error
+    if isinstance(error, DocumentDeletedError):
+        raise HTTPException(status_code=410, detail=str(error)) from error
     if isinstance(error, DocumentNotFoundError):
         raise HTTPException(status_code=404, detail=str(error)) from error
     if isinstance(error, DuplicateDocumentError):
@@ -84,10 +91,17 @@ def _create_milvus_client(uri: str) -> MilvusClient | AsyncMilvusClient:
     return MilvusClient(uri=uri)
 
 
-async def _close_milvus_client(client: MilvusClient | AsyncMilvusClient) -> None:
-    result = client.close()
+async def _close_client(client: Any) -> None:
+    close = getattr(client, "close", None)
+    if close is None:
+        return
+    result = close()
     if inspect.isawaitable(result):
         await result
+
+
+async def _close_milvus_client(client: MilvusClient | AsyncMilvusClient) -> None:
+    await _close_client(client)
 
 
 def create_app(*, facade: Any | None = None, settings: Settings | None = None) -> FastAPI:
@@ -96,35 +110,57 @@ def create_app(*, facade: Any | None = None, settings: Settings | None = None) -
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        if facade is None:
-            engine = create_async_engine(config.database_url)
-            minio_client = Minio(
-                config.minio_endpoint,
-                access_key=config.minio_access_key,
-                secret_key=config.minio_secret_key,
-                secure=config.minio_secure,
-            )
-            ollama_client = ollama.AsyncClient(host=config.ollama_endpoint)
-            milvus_client = _create_milvus_client(config.milvus_uri)
-            resources.update(engine=engine, milvus=milvus_client)
-            app.state.facade = KnowledgeManagement(
-                engine=engine,
-                minio_client=minio_client,
-                bucket_name=config.minio_bucket,
-                ollama_client=ollama_client,
-                milvus_client=milvus_client,
-                embedding_model=config.ollama_model,
-                collection_name=config.collection_name,
-                vector_dimension=config.vector_dimension,
-                chunk_size=config.chunk_size,
-                overlap=config.overlap,
-            )
-        else:
-            app.state.facade = facade
-        yield
-        if resources:
-            await _close_milvus_client(resources["milvus"])
-            await resources["engine"].dispose()
+        try:
+            if facade is None:
+                engine = create_async_engine(config.database_url)
+                resources["engine"] = engine
+                minio_client = Minio(
+                    config.minio_endpoint,
+                    access_key=config.minio_access_key,
+                    secret_key=config.minio_secret_key,
+                    secure=config.minio_secure,
+                )
+                ollama_client = ollama.AsyncClient(host=config.ollama_endpoint)
+                resources["ollama"] = ollama_client
+                milvus_client = _create_milvus_client(config.milvus_uri)
+                resources["milvus"] = milvus_client
+                app.state.facade = KnowledgeManagement(
+                    engine=engine,
+                    minio_client=minio_client,
+                    bucket_name=config.minio_bucket,
+                    ollama_client=ollama_client,
+                    milvus_client=milvus_client,
+                    embedding_model=config.ollama_model,
+                    collection_name=config.collection_name,
+                    vector_dimension=config.vector_dimension,
+                    chunk_size=config.chunk_size,
+                    overlap=config.overlap,
+                )
+            else:
+                app.state.facade = facade
+            yield
+        finally:
+            cleanup_error: Exception | None = None
+            try:
+                for key in ("milvus", "ollama"):
+                    client = resources.get(key)
+                    if client is None:
+                        continue
+                    try:
+                        await _close_client(client)
+                    except Exception as error:  # noqa: BLE001 - finish all cleanup
+                        cleanup_error = cleanup_error or error
+
+                engine = resources.get("engine")
+                if engine is not None:
+                    try:
+                        await engine.dispose()
+                    except Exception as error:  # noqa: BLE001 - finish all cleanup
+                        cleanup_error = cleanup_error or error
+            finally:
+                resources.clear()
+            if cleanup_error is not None:
+                raise cleanup_error
 
     app = FastAPI(title="docmesh-kbms REST API", version="0.1.0", lifespan=lifespan)
 
@@ -137,8 +173,6 @@ def create_app(*, facade: Any | None = None, settings: Settings | None = None) -
         file: Annotated[UploadFile, File()],
         title: Annotated[str, Form()],
         source_uri: Annotated[str, Form()],
-        partition_kind: Annotated[str, Form()],
-        partition_id: Annotated[str, Form()],
         document_id: Annotated[str | None, Form()] = None,
         metadata: Annotated[str | None, Form()] = None,
     ) -> Any:
@@ -147,7 +181,7 @@ def create_app(*, facade: Any | None = None, settings: Settings | None = None) -
                 content=await file.read(), filename=file.filename or "upload",
                 content_type=file.content_type or "application/octet-stream",
                 title=title, source_uri=source_uri, owner_id=config.user_id,
-                partition_kind=partition_kind, partition_id=partition_id,
+                partition_kind=FIXED_PARTITION_KIND, partition_id=FIXED_PARTITION_ID,
                 document_id=document_id, created_by=config.user_id,
                 metadata=_parse_metadata(metadata),
             )
@@ -157,12 +191,12 @@ def create_app(*, facade: Any | None = None, settings: Settings | None = None) -
 
     @app.get("/documents")
     async def list_documents(
-        partition_kind: str, partition_id: str, cursor: str | None = None,
+        cursor: str | None = None,
         limit: Annotated[int, Query(gt=0, le=1000)] = 100,
     ) -> Any:
         try:
             return _encode(await app.state.facade.list_documents(
-                partition_kind=partition_kind, partition_id=partition_id,
+                partition_kind=FIXED_PARTITION_KIND, partition_id=FIXED_PARTITION_ID,
                 cursor=cursor, limit=limit,
             ))
         except _API_ERRORS as error:
@@ -179,19 +213,21 @@ def create_app(*, facade: Any | None = None, settings: Settings | None = None) -
         return _encode(result)
 
     @app.get("/documents/{document_id}")
-    async def document_metadata(document_id: str, partition_kind: str, partition_id: str) -> Any:
+    async def document_metadata(document_id: str) -> Any:
         try:
             return _encode(await app.state.facade.get_document_metadata(
-                document_id, partition_kind=partition_kind, partition_id=partition_id,
+                document_id, partition_kind=FIXED_PARTITION_KIND,
+                partition_id=FIXED_PARTITION_ID,
             ))
         except _API_ERRORS as error:
             _raise_http(error)
 
     @app.get("/documents/{document_id}/content")
-    async def document_content(document_id: str, partition_kind: str, partition_id: str) -> Response:
+    async def document_content(document_id: str) -> Response:
         try:
             content = await app.state.facade.get_document_content(
-                document_id, partition_kind=partition_kind, partition_id=partition_id,
+                document_id, partition_kind=FIXED_PARTITION_KIND,
+                partition_id=FIXED_PARTITION_ID,
             )
             return Response(content=content.content, media_type=content.content_type,
                             headers={"Content-Disposition": _content_disposition(content.filename)})
@@ -199,12 +235,11 @@ def create_app(*, facade: Any | None = None, settings: Settings | None = None) -
             _raise_http(error)
 
     @app.delete("/documents/{document_id}", status_code=204)
-    async def delete_document(document_id: str, partition_kind: str, partition_id: str,
-                              hard_delete: bool = False) -> None:
+    async def delete_document(document_id: str, hard_delete: bool = False) -> None:
         try:
             await app.state.facade.delete_document(
-                document_id, partition_kind=partition_kind, partition_id=partition_id,
-                hard_delete=hard_delete,
+                document_id, partition_kind=FIXED_PARTITION_KIND,
+                partition_id=FIXED_PARTITION_ID, hard_delete=hard_delete,
             )
         except _API_ERRORS as error:
             _raise_http(error)
@@ -214,7 +249,7 @@ def create_app(*, facade: Any | None = None, settings: Settings | None = None) -
         try:
             hits = await app.state.facade.search(
                 request.query, limit=request.limit, document_id=request.document_id,
-                partition_kind=request.partition_kind, partition_id=request.partition_id,
+                partition_kind=FIXED_PARTITION_KIND, partition_id=FIXED_PARTITION_ID,
             )
             return _encode(hits)
         except _API_ERRORS as error:

@@ -7,6 +7,11 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.settings import Settings
 
+pytestmark = pytest.mark.skipif(
+    os.getenv("KBMS_RUN_REAL_INTEGRATION") != "1",
+    reason="set KBMS_RUN_REAL_INTEGRATION=1 to run live-provider tests",
+)
+
 
 @pytest.mark.real_integration
 def test_document_lifecycle_against_live_providers(tmp_path):
@@ -32,8 +37,6 @@ def test_document_lifecycle_against_live_providers(tmp_path):
                 data={
                     "title": "Live integration document",
                     "source_uri": "https://example.test/integration",
-                    "partition_kind": "personal",
-                    "partition_id": "dms",
                     "document_id": document_id,
                     "metadata": '{"suite":"real"}',
                 },
@@ -47,7 +50,6 @@ def test_document_lifecycle_against_live_providers(tmp_path):
 
             listing = client.get(
                 "/documents",
-                params={"partition_kind": "personal", "partition_id": "dms"},
             )
             assert listing.status_code == 200
             assert any(
@@ -57,7 +59,6 @@ def test_document_lifecycle_against_live_providers(tmp_path):
 
             metadata = client.get(
                 f"/documents/{document_id}",
-                params={"partition_kind": "personal", "partition_id": "dms"},
             )
             assert metadata.status_code == 200
             assert metadata.json()["metadata"]["title"] == (
@@ -66,7 +67,6 @@ def test_document_lifecycle_against_live_providers(tmp_path):
 
             content = client.get(
                 f"/documents/{document_id}/content",
-                params={"partition_kind": "personal", "partition_id": "dms"},
             )
             assert content.status_code == 200
             assert content.content == b"live knowledge document"
@@ -76,8 +76,6 @@ def test_document_lifecycle_against_live_providers(tmp_path):
                 json={
                     "query": "knowledge document",
                     "limit": 5,
-                    "partition_kind": "personal",
-                    "partition_id": "dms",
                 },
             )
             assert search.status_code == 200
@@ -87,11 +85,7 @@ def test_document_lifecycle_against_live_providers(tmp_path):
 
             deletion = client.delete(
                 f"/documents/{document_id}",
-                params={
-                    "partition_kind": "personal",
-                    "partition_id": "dms",
-                    "hard_delete": "true",
-                },
+                params={"hard_delete": "true"},
             )
             assert deletion.status_code == 204
             deleted = True
@@ -103,9 +97,5 @@ def test_document_lifecycle_against_live_providers(tmp_path):
             if not deleted:
                 client.delete(
                     f"/documents/{document_id}",
-                    params={
-                        "partition_kind": "personal",
-                        "partition_id": "dms",
-                        "hard_delete": "true",
-                    },
+                    params={"hard_delete": "true"},
                 )

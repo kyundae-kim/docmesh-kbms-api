@@ -1,6 +1,9 @@
 import pytest
+from dms import DocumentDeletedError
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.main import _content_disposition, _parse_metadata, _raise_http
 from app.settings import Settings
 
@@ -22,7 +25,11 @@ def test_content_disposition_removes_header_injection_characters():
 
 @pytest.mark.parametrize(
     ("error", "status_code"),
-    [(PermissionError("no"), 403), (ValueError("bad"), 422)],
+    [
+        (PermissionError("no"), 403),
+        (DocumentDeletedError("gone"), 410),
+        (ValueError("bad"), 422),
+    ],
 )
 def test_domain_input_errors_are_http_errors(error, status_code):
     with pytest.raises(HTTPException) as raised:
@@ -36,3 +43,51 @@ def test_settings_reads_environment_when_instantiated(monkeypatch):
     settings = Settings()
     assert settings.ollama_endpoint == "http://ollama.test:11434"
     assert settings.vector_dimension == 768
+
+
+def test_lifespan_closes_host_owned_clients(monkeypatch):
+    class FakeEngine:
+        def __init__(self):
+            self.disposed = False
+
+        async def dispose(self):
+            self.disposed = True
+
+    class FakeMilvus:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakeOllama:
+        def __init__(self):
+            self.closed = False
+
+        async def close(self):
+            self.closed = True
+
+    class FakeFacade:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    engine = FakeEngine()
+    milvus = FakeMilvus()
+    ollama_client = FakeOllama()
+
+    monkeypatch.setattr(main_module, "create_async_engine", lambda _: engine)
+    monkeypatch.setattr(main_module, "Minio", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        main_module.ollama,
+        "AsyncClient",
+        lambda *args, **kwargs: ollama_client,
+    )
+    monkeypatch.setattr(main_module, "_create_milvus_client", lambda _: milvus)
+    monkeypatch.setattr(main_module, "KnowledgeManagement", FakeFacade)
+
+    with TestClient(main_module.create_app(settings=Settings())) as client:
+        assert client.get("/health").json() == {"status": "ok"}
+
+    assert engine.disposed
+    assert milvus.closed
+    assert ollama_client.closed

@@ -10,6 +10,10 @@ from app.settings import Settings
 
 pytestmark = [
     pytest.mark.connection,
+    pytest.mark.skipif(
+        os.getenv("KBMS_RUN_CONNECTION_TESTS") != "1",
+        reason="set KBMS_RUN_CONNECTION_TESTS=1 to run provider checks",
+    ),
 ]
 
 

@@ -61,6 +61,12 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# Local KBMS provider state
+*.db
+*.db-shm
+*.db-wal
+milvus.db/
+
 # Flask stuff:
 instance/
 .webassets-cache

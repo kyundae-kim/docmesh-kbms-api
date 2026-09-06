@@ -29,6 +29,7 @@ python_files = ["test_*.py"]
 python_functions = ["test_*"]
 markers = [
     "connection: checks SQLite, local Milvus, and Ollama connectivity",
+    "integration: exercises the FastAPI application with an injected domain facade",
     "real_integration: exercises the API against live providers",
 ]
 
