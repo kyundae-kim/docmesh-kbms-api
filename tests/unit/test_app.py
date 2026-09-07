@@ -57,6 +57,12 @@ def test_lifespan_closes_host_owned_clients(monkeypatch):
         def __init__(self):
             self.closed = False
 
+        def has_collection(self, *, collection_name):
+            return False
+
+        def load_collection(self, *, collection_name):
+            pass
+
         def close(self):
             self.closed = True
 
@@ -91,3 +97,48 @@ def test_lifespan_closes_host_owned_clients(monkeypatch):
     assert engine.disposed
     assert milvus.closed
     assert ollama_client.closed
+
+
+def test_lifespan_loads_existing_milvus_collection(monkeypatch):
+    class FakeEngine:
+        async def dispose(self):
+            pass
+
+    class FakeMilvus:
+        def __init__(self):
+            self.loaded_collection = None
+
+        def has_collection(self, *, collection_name):
+            return collection_name == "kbms_documents"
+
+        def load_collection(self, *, collection_name):
+            self.loaded_collection = collection_name
+
+        def close(self):
+            pass
+
+    class FakeOllama:
+        async def close(self):
+            pass
+
+    class FakeFacade:
+        def __init__(self, **kwargs):
+            pass
+
+    engine = FakeEngine()
+    milvus = FakeMilvus()
+
+    monkeypatch.setattr(main_module, "create_async_engine", lambda _: engine)
+    monkeypatch.setattr(main_module, "Minio", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        main_module.ollama,
+        "AsyncClient",
+        lambda *args, **kwargs: FakeOllama(),
+    )
+    monkeypatch.setattr(main_module, "_create_milvus_client", lambda _: milvus)
+    monkeypatch.setattr(main_module, "KnowledgeManagement", FakeFacade)
+
+    with TestClient(main_module.create_app(settings=Settings())):
+        pass
+
+    assert milvus.loaded_collection == "kbms_documents"

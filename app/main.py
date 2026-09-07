@@ -86,8 +86,6 @@ def _content_disposition(filename: str) -> str:
 
 
 def _create_milvus_client(uri: str) -> MilvusClient | AsyncMilvusClient:
-    if "://" in uri:
-        return AsyncMilvusClient(uri=uri)
     return MilvusClient(uri=uri)
 
 
@@ -124,6 +122,13 @@ def create_app(*, facade: Any | None = None, settings: Settings | None = None) -
                 resources["ollama"] = ollama_client
                 milvus_client = _create_milvus_client(config.milvus_uri)
                 resources["milvus"] = milvus_client
+                if ':' not in config.milvus_uri:
+                    if milvus_client.has_collection(
+                        collection_name=config.collection_name
+                    ):
+                        milvus_client.load_collection(
+                            collection_name=config.collection_name
+                        )
                 app.state.facade = KnowledgeManagement(
                     engine=engine,
                     minio_client=minio_client,
