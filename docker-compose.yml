@@ -1,0 +1,43 @@
+services:
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    ports:
+      - 9000
+      - 9001
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    # volumes:
+    #   - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 8000
+    environment:
+      KBMS_USER_ID: dms
+      KBMS_DATABASE_URL: sqlite+aiosqlite:///./data/kbms.db
+      KBMS_MINIO_ENDPOINT: minio:9000
+      KBMS_MINIO_ACCESS_KEY: minioadmin
+      KBMS_MINIO_SECRET_KEY: minioadmin123
+      KBMS_MINIO_BUCKET: kbms-documents
+      KBMS_MINIO_SECURE: "false"
+      KBMS_OLLAMA_ENDPOINT: http://192.168.219.106:11434
+      KBMS_OLLAMA_MODEL: bge-m3
+      KBMS_MILVUS_URI: ./data/milvus.db
+      KBMS_COLLECTION_NAME: kbms_documents
+      KBMS_VECTOR_DIMENSION: 1024
+      KBMS_CHUNK_SIZE: 1000
+      KBMS_CHUNK_OVERLAP: 100
+    restart: unless-stopped
+    depends_on:
+      - minio
