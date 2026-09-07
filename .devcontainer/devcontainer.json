@@ -1,8 +1,8 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/postgres
 {
-	"name": "fastapi template",
-	"dockerComposeFile": "docker-compose.yml",
+	"name": "docmesh kbms api dev container",
+	"dockerComposeFile": ["docker-compose.yml", "docker-compose.minio.yml"],
 	"service": "app",
 	"mounts": [
 		"source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=cached"

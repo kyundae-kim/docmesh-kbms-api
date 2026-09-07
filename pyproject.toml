@@ -1,24 +1,37 @@
 [project]
-name = "fastapi-template"
+name = "docmesh-kbms-api"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "aiosqlite>=0.22.1",
+    "docmesh-kbms>=0.1.0",
     "fastapi[standard]>=0.135.3",
+    "minio>=7.2.20",
+    "ollama>=0.6.2",
+    "pymilvus[milvus-lite]>=3.0.1",
+    "sqlalchemy>=2.0.52",
 ]
 
 [tool.fastapi]
-entrypoint = "fastapi_template.main:app"
+entrypoint = "app.main:app"
 
 [tool.ruff]
 line-length = 88
 indent-width = 4
+exclude = [".hermes"]
 
 [tool.pytest.ini_options]
-testpaths = ["test_fastapi_template"]
+testpaths = ["tests"]
+pythonpath = ["."]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "connection: checks SQLite, local Milvus, and Ollama connectivity",
+    "integration: exercises the FastAPI application with an injected domain facade",
+    "real_integration: exercises the API against live providers",
+]
 
 [dependency-groups]
 dev = [

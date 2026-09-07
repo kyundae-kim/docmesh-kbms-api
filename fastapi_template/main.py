@@ -1,2 +1,0 @@
-
-# app = create_app()
